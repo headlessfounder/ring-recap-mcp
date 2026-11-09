@@ -1,0 +1,17 @@
+{
+  "locationName": "",
+  "vaultDir": "~/RingVault",
+  "timezone": "America/New_York",
+  "syncHourLocal": 4,
+  "describer": "grok",
+  "grokModel": "grok-4",
+  "ollamaModel": "qwen2.5-vl:7b",
+  "frameEverySeconds": 2,
+  "maxFramesPerClip": 24,
+  "whisperModel": "ggml-large-v3-turbo.bin",
+  "skipTranscriptIfSilent": true,
+  "silenceDbThreshold": -45,
+  "faces": { "enabled": false, "matchThreshold": 0.45 },
+  "retention": { "clipJsonDays": 365, "thumbsDays": 180, "unknownFacesDays": 30 },
+  "http": { "enabled": true, "port": 8787 }
+}

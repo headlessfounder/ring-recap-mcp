@@ -1,0 +1,55 @@
+{
+  "name": "ring-recap-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local MCP server that turns your Ring camera event clips into time-coded, searchable daily recaps. Video and audio are processed on your Mac.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "ring-recap": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p dist/db && cp src/db/schema.sql dist/db/schema.sql",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index.js --http",
+    "sync": "node dist/index.js --run sync_day"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "better-sqlite3": "^13.0.3",
+    "pino": "^10.4.0",
+    "ring-client-api": "14.3.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.18.0",
+    "typescript": "5.9.3",
+    "vitest": "^5.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/headlessfounder/ring-recap-mcp.git"
+  },
+  "homepage": "https://github.com/headlessfounder/ring-recap-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/headlessfounder/ring-recap-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ring",
+    "security-camera",
+    "whisper",
+    "macos",
+    "recap"
+  ],
+  "os": [
+    "darwin"
+  ]
+}

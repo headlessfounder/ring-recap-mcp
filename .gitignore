@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+python/.venv/
+python/__pycache__/
+# never commit real config or secrets
+config.json
+*.token
