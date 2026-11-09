@@ -92,7 +92,9 @@ test/                 vitest; helpers.ts has the fakes
 * Location names can carry trailing spaces. Matching is trimmed and case-insensitive.
 * Some very short events 404 on every URL. These are `recording_unavailable`, not encryption.
   Only 401/403 on every download from a camera counts toward the E2EE warning.
-* Downloaded MP4s run 1 to 6 s longer than the row's `duration`. Calibrate before trusting time
-  codes ([ROADMAP section 4](docs/ROADMAP.md#4-time-codes-the-model)).
+* Downloaded MP4s run 1 to 6 s longer than the row's `duration`, so wall-clock times
+  (`created_at + offset`) are approximate. Do not calibrate. Tools pad every wall-clock window by
+  `timePaddingSeconds` (default 10) on both sides
+  ([ROADMAP section 4](docs/ROADMAP.md#4-time-codes-the-model)).
 * Rotated refresh tokens arrive through `onRefreshTokenUpdated` and are saved to the Keychain at
   once.

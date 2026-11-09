@@ -55,7 +55,8 @@ that in three ways.
    after describing because they can be regenerated from the footage.
 2. **Everything is time-coded.** Each transcript line, sampled frame and described moment carries
    its offset inside the clip and its absolute wall-clock time. A briefing can say "2:32:07 PM, Back
-   door: two people carry boxes out", and an agent can pull exactly that window.
+   door: two people carry boxes out", and an agent can pull that window with a few seconds of
+   margin on each side (times are approximate; see [section 4](#4-time-codes-the-model)).
 3. **The system knows where things happen.** Each camera maps to a named area that the owner
    writes once. The vision model also says where in the frame each moment happens ("by the roll-up
    door"). Recaps and the timeline use area names, not only camera names.
@@ -108,29 +109,34 @@ sequenceDiagram
 
 ## 4. Time codes: the model
 
-Every clip has three clocks. Keep them separate in code and in the ledger.
+Every clip has two clocks:
 
 | Name | Meaning | Source |
 | --- | --- | --- |
 | `created_at` | Ring's event time (epoch ms) | `videoSearch` row |
-| `video_start_at` | wall-clock time of frame 0 of the MP4 (epoch ms) | `created_at - preroll_ms` (calibrated, below) |
 | `offset_ms` | position inside the MP4 | ffmpeg / whisper |
 
-Absolute time of anything inside a clip is `video_start_at + offset_ms`.
+The absolute time of anything inside a clip is `at = created_at + offset_ms`. Offsets inside a
+file are exact. Only the mapping to wall-clock time is approximate.
 
-**Calibration (required in Phase 2).** Downloaded files run 1 to 6 s longer than Ring's `duration`.
-The extra is probably pre-roll before the trigger, but that is not yet verified. Ring's search rows
-carry a `preroll_duration` field (null on the rows seen so far). Do this before trusting any
-time code:
+**Times are approximate: pad, do not calibrate.** Downloaded files run 1 to 6 s longer than
+Ring's `duration`, so `at` can be off by a few seconds. There is no calibration step. Instead,
+every tool that takes a wall-clock window widens it by `timePaddingSeconds` (default 10) on both
+sides:
 
-1. Store `preroll_duration` and the ffprobe file duration for every clip.
-2. Hold a phone showing a seconds clock (time.gov) in front of one camera for 30 s, sync, and
-   compare the clock in frames at known offsets with `created_at + offset`.
-3. Set `video_start_at = created_at - preroll_ms`. Use `preroll_duration` when Ring provides it.
-   Otherwise use the measured rule (for example `file_duration - ring_duration`, or a constant).
-   Write the rule and the measurement into this section.
+* `get_footage {camera, from, to}` cuts from `from - pad` to `to + pad`, clamped to what was
+  recorded, and returns both the requested and the padded window.
+* `get_timeline` and `search_events` with `from` / `to` include speech and moments inside the
+  padded window. Results stay sorted by `at`, and anything that falls only in the padding is
+  marked `in_padding: true`.
+* `get_frame` with an absolute time returns a short strip of frames (up to 5) covering
+  `at ± pad`, each labeled with its time. With a clip offset (`+6`) it returns the one exact
+  frame.
+* Every time a tool returns carries `approx_s` (equal to `timePaddingSeconds`), so agents know
+  the precision.
 
-Acceptance: absolute times agree with the phone clock within 2 s.
+Store `file_duration_s` (ffprobe) for every clip. A clip's recorded span is then `created_at` to
+`created_at + file_duration_s`, which is what padding clamps to.
 
 **Display format.** Tools return ISO 8601 with the local offset (`2026-11-07T14:32:07-05:00`) and
 `offset_s` (number). Human text uses `2:32:07 PM` plus `+0:06` where useful. All local times use
@@ -216,9 +222,7 @@ Add migrations; never drop data. Keep `CREATE ... IF NOT EXISTS` and add a `sche
 
 ```sql
 -- clips: new columns
-ALTER TABLE clips ADD COLUMN video_start_at INTEGER;     -- epoch ms of mp4 frame 0
-ALTER TABLE clips ADD COLUMN preroll_ms INTEGER;
-ALTER TABLE clips ADD COLUMN file_duration_s REAL;       -- ffprobe
+ALTER TABLE clips ADD COLUMN file_duration_s REAL;       -- ffprobe; recorded span = created_at .. + this
 ALTER TABLE clips ADD COLUMN footage_path TEXT;
 ALTER TABLE clips ADD COLUMN footage_deleted_at INTEGER;
 ALTER TABLE clips ADD COLUMN area TEXT;                   -- config area at processing time
@@ -269,7 +273,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS timeline_fts USING fts5(
 `clips_fts` can stay for whole-clip search. `search_events` should query `timeline_fts` so a hit
 on a spoken phrase returns the time it was said.
 
-The clip JSON written to `clips/<day>/<cam>/<dingId>.json` gains `video_start_at`, `segments[]`,
+The clip JSON written to `clips/<day>/<cam>/<dingId>.json` gains `file_duration_s`, `segments[]`,
 `frames[]` (offsets only), `moments[]` and `area`.
 
 ## 8. Config v2
@@ -284,6 +288,7 @@ New keys (all optional, with defaults). Add them to `src/config.ts` and `config.
   "describe": { "maxFrames": 8, "maxWidth": 768, "skipQuietMotion": false },
   "retention": { "footageDays": 7, "maxFootageGB": 150, "exportsDays": 2 },
   "footage": { "transcode": "none" },
+  "timePaddingSeconds": 10,
   "whisperVadModel": "ggml-silero-v5.1.2.bin"
 }
 ```
@@ -342,7 +347,8 @@ text model fails, write a deterministic recap from the same data instead of fail
 ## 10. MCP tools v2
 
 Existing: `list_cameras`, `sync_day`, `health`. Add the rest. All times in and out are ISO 8601,
-or `YYYY-MM-DD HH:MM[:SS]` read in `config.timezone`.
+or `YYYY-MM-DD HH:MM[:SS]` read in `config.timezone`. Every wall-clock window is widened by
+`timePaddingSeconds` on both sides (see [section 4](#4-time-codes-the-model)).
 
 | Tool | Input | Output |
 | --- | --- | --- |
@@ -350,8 +356,8 @@ or `YYYY-MM-DD HH:MM[:SS]` read in `config.timezone`.
 | `search_events` | `{query, from?, to?, camera?, area?, limit?}` | hits with `at` (time of the matching line or moment), `offset_s`, camera, area, snippet, `ding_id` |
 | `get_timeline` | `{from, to, camera?, area?, notableOnly?, limit?}` | moments and speech in order across cameras, each with `at`, `offset_s`, camera, area, what, `where_in_frame`, `ding_id`, `footage_available` |
 | `get_clip_detail` | `{ding_id}` | clip JSON with segments, moments, frame offsets, `footage_path`, `footage_expires_at`, thumbnail image |
-| `get_frame` | `{ding_id, at}` where `at` is `+6`, `+0:06` or an absolute time | one JPEG (MCP image content), max 1280 px |
-| `get_footage` | `{ding_id}` or `{camera, from, to}` (max 10 min) | writes `exports/<camera>_<from>_<to>.mp4` and returns its local path, real start and end, the clips it spans, gaps, and a contact sheet image (up to 12 tiles with time labels) |
+| `get_frame` | `{ding_id, at}` where `at` is `+6`, `+0:06` or an absolute time | for a clip offset: the one JPEG at that offset; for an absolute time: up to 5 JPEGs covering `at ± timePaddingSeconds`; max 1280 px |
+| `get_footage` | `{ding_id}` or `{camera, from, to}` (max 10 min before padding) | cuts the padded window and writes `exports/<camera>_<from>_<to>.mp4`; returns its local path, the requested and padded windows, the clips it spans, gaps, and a contact sheet image (up to 12 tiles with time labels) |
 | `enroll_face` | `{name, ding_id, faceIndex?}` or `{name, imagePath}` | Phase 5 |
 | `describe_cameras` | none | draft `cameras` config block (Phase 3) |
 | `health` | none | adds `footageBytes`, `footageOldestDay`, `footageDaysKept`, `exportsBytes`, `lastSweep` |
@@ -396,17 +402,18 @@ Cost levers, in order:
 
 Build `src/pipeline/audio.ts`, `src/pipeline/frames.ts`, the `segments` and `frames` tables, and
 the migration runner. Add `audio` and `frames` to `AVAILABLE_STAGES`, wire them into
-`processClip`, and add the VAD model to the installer. Do the time calibration from
-[section 4](#4-time-codes-the-model).
+`processClip`, and add the VAD model to the installer.
 
 * Transcripts with segment offsets appear for clips with speech. Silent and no-audio clips are
   skipped and marked (`audio_state`).
 * Frames are capped at `maxFramesPerClip`, each with `offset_ms`. Every clip has a thumbnail.
-* Time calibration done: absolute times within 2 s of a phone clock on one camera.
+* Every segment and frame row has `at = created_at + offset_ms`, and every clip has
+  `file_duration_s`. There is no calibration step; precision is handled by padding
+  ([section 4](#4-time-codes-the-model)).
 * A full day (all clips) through download, audio and frames finishes in under 60 minutes, or the
   per-stage numbers are reported to the owner.
-* Tests: segment parsing, frame offset pairing and dropping, silence detection, calibration math,
-  all with fixtures (no Ring, no network).
+* Tests: segment parsing, frame offset pairing and dropping, silence detection, time math across
+  DST days, all with fixtures (no Ring, no network).
 
 ### Phase 3: descriptions, recaps, 7 day footage, nightly job
 
@@ -430,8 +437,12 @@ Build `get_timeline`, `get_frame` and `get_footage`, plus `timeline_fts` and the
 additions.
 
 * From a recap line, an agent can call `get_timeline` for a 15 minute window and get the moments
-  in order with correct absolute times.
-* `get_frame` for a moment returns the frame that shows it.
+  in order with their absolute times, plus anything in the padding marked `in_padding`.
+* `get_frame` with a moment's clip offset returns the frame that shows it. With an absolute time
+  it returns the frames covering `at ± timePaddingSeconds`.
+* Padding: a `get_footage` request for 14:32:00 to 14:33:00 returns footage from 14:31:50 to
+  14:33:10 (default 10 s) where recorded, and reports both windows. Tests cover clamping at clip
+  edges, at gaps between clips and at the start and end of the day.
 * `get_footage` for a 2 minute window spanning 2 clips returns a playable MP4, the gap between
   them, and a contact sheet.
 * Expired footage returns a clear "footage expired on <date>" result, not an error.

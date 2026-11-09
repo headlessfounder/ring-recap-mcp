@@ -150,8 +150,9 @@ Contributors and coding agents should start with [AGENTS.md](AGENTS.md).
   cap. A busy day needed 69 splits.
 * Events whose video 404s on every URL are recorded as `recording_unavailable`. Only 401/403 on
   every download from a camera counts toward the end-to-end encryption warning.
-* Downloaded MP4s run 1 to 6 s longer than Ring's `duration` field, so time codes need a
-  calibration step (roadmap section 4).
+* Downloaded MP4s run 1 to 6 s longer than Ring's `duration` field, so wall-clock times can be a
+  few seconds off. Instead of calibrating, the time-frame tools pad every window by
+  `timePaddingSeconds` (default 10) on both sides (roadmap section 4).
 * `security -i` truncates input lines over about 4 KB, so Keychain writes use stdin for short
   values and argv for long ones, and always read the value back.
 * Clips with `hq_url: null` that are still processing stay `queued` for the next run. A failed
